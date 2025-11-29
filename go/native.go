@@ -4,6 +4,7 @@ package rzpipe
 
 import (
 	"errors"
+	"runtime"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -40,26 +41,55 @@ func goString(ptr uintptr) string {
 	return string(bytes)
 }
 
+// getLibraryNames returns platform-specific library names for rizin core and libc
+func getLibraryNames() (rzCoreName string, libcName string) {
+	switch runtime.GOOS {
+	case "darwin":
+		return "librz_core.dylib", "libSystem.B.dylib"
+	case "windows":
+		return "rz_core.dll", "msvcrt.dll"
+	default: // linux and others
+		return "librz_core.so", "libc.so.6"
+	}
+}
+
 func NativeLoad() error {
 	if libLoaded {
 		return nil
 	}
 
-	librz, err := purego.Dlopen("librz_core.so", purego.RTLD_NOW|purego.RTLD_GLOBAL)
+	rzCoreName, libcName := getLibraryNames()
+
+	librz, err := purego.Dlopen(rzCoreName, purego.RTLD_NOW|purego.RTLD_GLOBAL)
 	if err != nil {
 		return err
 	}
 
 	purego.RegisterLibFunc(&rz_core_new, librz, "rz_core_new")
+	if rz_core_new == nil {
+		return errors.New("failed to load rz_core_new")
+	}
+
 	purego.RegisterLibFunc(&rz_core_free, librz, "rz_core_free")
+	if rz_core_free == nil {
+		return errors.New("failed to load rz_core_free")
+	}
+
 	purego.RegisterLibFunc(&rz_core_cmd_str, librz, "rz_core_cmd_str")
+	if rz_core_cmd_str == nil {
+		return errors.New("failed to load rz_core_cmd_str")
+	}
 
 	// Load free function from libc
-	libc, err := purego.Dlopen("libc.so.6", purego.RTLD_NOW)
+	libc, err := purego.Dlopen(libcName, purego.RTLD_NOW)
 	if err != nil {
 		return err
 	}
+
 	purego.RegisterLibFunc(&libc_free, libc, "free")
+	if libc_free == nil {
+		return errors.New("failed to load free from libc")
+	}
 
 	libLoaded = true
 	return nil
