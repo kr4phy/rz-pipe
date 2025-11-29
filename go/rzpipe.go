@@ -19,7 +19,7 @@ type Pipe struct {
 	rzcmd  *exec.Cmd
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
-	Core   *struct{}
+	core   uintptr
 	cmd    CmdDelegate
 	close  CloseDelegate
 }
@@ -67,7 +67,7 @@ func newPipeFd() (*Pipe, error) {
 		rzcmd:  nil,
 		stdin:  stdin,
 		stdout: stdout,
-		Core:   nil,
+		core:   0,
 	}
 
 	return rzp, nil
@@ -100,7 +100,7 @@ func newPipeCmd(file string) (*Pipe, error) {
 		rzcmd:  rzcmd,
 		stdin:  stdin,
 		stdout: stdout,
-		Core:   nil,
+		core:   0,
 	}
 
 	return rzp, nil
@@ -120,7 +120,7 @@ func (rzp *Pipe) Read(p []byte) (n int, err error) {
 
 // Cmd is a helper that allows to run rizin commands and receive their output.
 func (rzp *Pipe) Cmd(cmd string) (string, error) {
-	if rzp.Core != nil {
+	if rzp.core != 0 {
 		if rzp.cmd != nil {
 			return rzp.cmd(rzp, cmd)
 		}
@@ -143,6 +143,20 @@ func (rzp *Pipe) Cmd(cmd string) (string, error) {
 // Cmdj acts like Cmd but interprets the output of the command as json. It
 // returns the parsed json keys and values.
 func (rzp *Pipe) Cmdj(cmd string) (interface{}, error) {
+	// Support Native mode (when core is set)
+	if rzp.core != 0 {
+		result, err := rzp.Cmd(cmd)
+		if err != nil {
+			return nil, err
+		}
+
+		var output interface{}
+		if err := json.Unmarshal([]byte(result), &output); err != nil {
+			return nil, err
+		}
+		return output, nil
+	}
+
 	if _, err := fmt.Fprintln(rzp, cmd); err != nil {
 		return nil, err
 	}
