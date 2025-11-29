@@ -33,7 +33,7 @@ func TestCmdj(t *testing.T) {
 	}
 	defer rzp.Close()
 
-	// Test JSON output with iIj (info about current binary)
+	// Test JSON output with ij (info about current binary)
 	result, err := rzp.Cmdj("ij")
 	if err != nil {
 		t.Fatal(err)

@@ -4,7 +4,9 @@ package rzpipe
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
+	"strings"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -53,7 +55,7 @@ func getLibraryNames() (rzCoreName string, libcName string) {
 	}
 }
 
-func NativeLoad() error {
+func NativeLoad() (err error) {
 	if libLoaded {
 		return nil
 	}
@@ -65,31 +67,23 @@ func NativeLoad() error {
 		return err
 	}
 
-	purego.RegisterLibFunc(&rz_core_new, librz, "rz_core_new")
-	if rz_core_new == nil {
-		return errors.New("failed to load rz_core_new")
-	}
-
-	purego.RegisterLibFunc(&rz_core_free, librz, "rz_core_free")
-	if rz_core_free == nil {
-		return errors.New("failed to load rz_core_free")
-	}
-
-	purego.RegisterLibFunc(&rz_core_cmd_str, librz, "rz_core_cmd_str")
-	if rz_core_cmd_str == nil {
-		return errors.New("failed to load rz_core_cmd_str")
-	}
-
-	// Load free function from libc
+	// Load free function from libc first (needed for cleanup)
 	libc, err := purego.Dlopen(libcName, purego.RTLD_NOW)
 	if err != nil {
 		return err
 	}
 
+	// RegisterLibFunc panics if symbol not found, so we use recover
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("failed to load symbol: %v", r)
+		}
+	}()
+
+	purego.RegisterLibFunc(&rz_core_new, librz, "rz_core_new")
+	purego.RegisterLibFunc(&rz_core_free, librz, "rz_core_free")
+	purego.RegisterLibFunc(&rz_core_cmd_str, librz, "rz_core_cmd_str")
 	purego.RegisterLibFunc(&libc_free, libc, "free")
-	if libc_free == nil {
-		return errors.New("failed to load free from libc")
-	}
 
 	libLoaded = true
 	return nil
@@ -119,6 +113,21 @@ func (rzp *Pipe) NativeClose() error {
 	return nil
 }
 
+// quoteFilePath escapes special characters in file paths for rizin commands
+func quoteFilePath(file string) string {
+	// Escape special characters that could be interpreted as command separators
+	replacer := strings.NewReplacer(
+		"\\", "\\\\",
+		"\"", "\\\"",
+		";", "\\;",
+		"`", "\\`",
+		"$", "\\$",
+		"\n", "",
+		"\r", "",
+	)
+	return "\"" + replacer.Replace(file) + "\""
+}
+
 func NewNativePipe(file string) (*Pipe, error) {
 	if err := NativeLoad(); err != nil {
 		return nil, err
@@ -138,7 +147,7 @@ func NewNativePipe(file string) (*Pipe, error) {
 		},
 	}
 	if file != "" {
-		_, err := rzp.NativeCmd("o " + file)
+		_, err := rzp.NativeCmd("o " + quoteFilePath(file))
 		if err != nil {
 			rzp.NativeClose()
 			return nil, err
