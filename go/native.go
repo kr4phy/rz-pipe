@@ -18,13 +18,16 @@ var (
 	libc_free       func(uintptr)
 )
 
-// goString converts a C string (null-terminated) to a Go string
+// goString converts a C string (null-terminated) to a Go string.
+// The caller must ensure the pointer is valid and points to a null-terminated string.
+// A maximum length limit is applied to prevent reading beyond allocated memory.
 func goString(ptr uintptr) string {
 	if ptr == 0 {
 		return ""
 	}
+	const maxLen = 1 << 20 // 1MB safety limit
 	var length int
-	for {
+	for length < maxLen {
 		b := *(*byte)(unsafe.Pointer(ptr + uintptr(length)))
 		if b == 0 {
 			break
@@ -34,10 +37,7 @@ func goString(ptr uintptr) string {
 	if length == 0 {
 		return ""
 	}
-	bytes := make([]byte, length)
-	for i := 0; i < length; i++ {
-		bytes[i] = *(*byte)(unsafe.Pointer(ptr + uintptr(i)))
-	}
+	bytes := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), length)
 	return string(bytes)
 }
 
@@ -111,6 +111,9 @@ func (rzp *Pipe) NativeCmd(cmd string) (string, error) {
 }
 
 func (rzp *Pipe) NativeClose() error {
+	if rzp.core == 0 {
+		return nil // Already closed
+	}
 	rz_core_free(rzp.core)
 	rzp.core = 0
 	return nil
@@ -121,6 +124,9 @@ func NewNativePipe(file string) (*Pipe, error) {
 		return nil, err
 	}
 	rz := rz_core_new()
+	if rz == 0 {
+		return nil, errors.New("failed to create rizin core")
+	}
 	rzp := &Pipe{
 		File: file,
 		core: rz,
@@ -132,7 +138,11 @@ func NewNativePipe(file string) (*Pipe, error) {
 		},
 	}
 	if file != "" {
-		rzp.NativeCmd("o " + file)
+		_, err := rzp.NativeCmd("o " + file)
+		if err != nil {
+			rzp.NativeClose()
+			return nil, err
+		}
 	}
 	return rzp, nil
 }
