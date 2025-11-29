@@ -1,5 +1,5 @@
 module github.com/rizinorg/rz-pipe/go
 
-go 1.15
+go 1.21
 
-require github.com/rainycape/dl v0.0.0-20151222075243-1b01514224a1
+require github.com/ebitengine/purego v0.9.1
